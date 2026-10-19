@@ -115,7 +115,7 @@ stop_service() {
 	done
 	[ -n "$_killed" ] && sleep 1
 
-	local chain_name IP family table tid
+	local chain_name IP family table tid _pair _owned
 
 	mwan3_init
 	config_foreach mwan3_interface_shutdown interface
@@ -128,8 +128,17 @@ stop_service() {
 			IP="$IP6"
 		fi
 
-		for tid in $($IP route list table all | sed -ne 's/.*table \([0-9]\+\).*/\1/p' | sort -u); do
-			[ $tid -gt $MWAN3_INTERFACE_MAX ] && continue
+		# Flush only the routing tables owned by mwan3's configured
+		# interfaces. The previous implementation flushed every table with an
+		# id <= MWAN3_INTERFACE_MAX, which also wiped unrelated tables in that
+		# range -- notably Tailscale's table 52 -- breaking tailnet/subnet
+		# routing until tailscaled was restarted.
+		mwan3_update_iface_to_table
+		_owned=""
+		for _pair in $mwan3_iface_tbl; do
+			_owned="$_owned ${_pair#*=}"
+		done
+		for tid in $_owned; do
 			$IP route flush table $tid &> /dev/null
 		done
 
